@@ -14,7 +14,6 @@ const CONFIG = {
 let stats = {}; // Estadísticas de jugadores
 let playerBans = []; // Lista de baneados
 let adminPlayers = []; // Admins del servidor
-let gameActive = false;
 
 // ==================== INICIALIZACIÓN ====================
 
@@ -25,9 +24,8 @@ room.setTimeLimit(0);
 room.sendChat(`🟢 Servidor ⚽ PERÚ FUTSAL x7 iniciado correctamente!`);
 room.sendChat(`📋 Escribe !ayuda para ver comandos disponibles.`);
 
-// ==================== FUNCIONES PRINCIPALES ====================
+// ==================== EVENTO: JUGADOR ENTRA ====================
 
-// Evento: Jugador entra
 room.onPlayerJoin = function (player) {
   // Verificar si está baneado
   if (playerBans.includes(player.id)) {
@@ -56,12 +54,14 @@ room.onPlayerJoin = function (player) {
   updateScoreboard();
 };
 
-// Evento: Jugador sale
+// ==================== EVENTO: JUGADOR SALE ====================
+
 room.onPlayerLeave = function (player) {
   updateScoreboard();
 };
 
-// Evento: Mensaje en chat
+// ==================== EVENTO: MENSAJE EN CHAT ====================
+
 room.onPlayerChat = function (player, message) {
   const args = message.trim().split(" ");
   const command = args[0].toLowerCase();
@@ -147,7 +147,8 @@ room.onPlayerChat = function (player, message) {
   return true;
 };
 
-// Evento: Gol anotado
+// ==================== EVENTO: GOL ANOTADO ====================
+
 room.onGoal = function (player) {
   if (player && stats[player.id]) {
     stats[player.id].goals++;
@@ -273,32 +274,37 @@ function findPlayerByName(name) {
 }
 
 function updateScoreboard() {
-  const players = room.getPlayer(null) || [];
-  const redTeam = players.filter((p) => p.team === 1).length;
-  const blueTeam = players.filter((p) => p.team === 2).length;
-  const spectators = players.filter((p) => p.team === 0).length;
-  
-  room.setScoreBoard(
-    `⚽ PERÚ FUTSAL x7 | 🔴 Rojos: ${redTeam} | 🔵 Azules: ${blueTeam} | 👁️ Espectadores: ${spectators}`
-  );
+  try {
+    const players = room.getPlayer(null) || [];
+    const redTeam = players.filter((p) => p.team === 1).length;
+    const blueTeam = players.filter((p) => p.team === 2).length;
+    const spectators = players.filter((p) => p.team === 0).length;
+    
+    room.setScoreBoard(
+      `⚽ PERÚ FUTSAL x7 | 🔴 Rojos: ${redTeam} | 🔵 Azules: ${blueTeam} | 👁️ Espectadores: ${spectators}`
+    );
+  } catch (e) {
+    // Ignorar errores si room no está listo
+  }
 }
 
 // ==================== ROTACIÓN AUTOMÁTICA DE EQUIPOS ====================
 setInterval(function () {
-  const players = room.getPlayer(null) || [];
-  if (players.length >= 4) {
-    // Rotar aleatoriamente algunos jugadores cada 3 minutos
-    const rotateCount = Math.floor(players.length * 0.2); // 20% de los jugadores
-    for (let i = 0; i < rotateCount; i++) {
-      const randomPlayer = players[Math.floor(Math.random() * players.length)];
-      if (randomPlayer && randomPlayer.team !== 0) {
-        const newTeam = randomPlayer.team === 1 ? 2 : 1;
-        room.setPlayerTeam(randomPlayer.id, newTeam);
+  try {
+    const players = room.getPlayer(null) || [];
+    if (players.length >= 4) {
+      // Rotar aleatoriamente algunos jugadores cada 3 minutos
+      const rotateCount = Math.floor(players.length * 0.2); // 20% de los jugadores
+      for (let i = 0; i < rotateCount; i++) {
+        const randomPlayer = players[Math.floor(Math.random() * players.length)];
+        if (randomPlayer && randomPlayer.team !== 0) {
+          const newTeam = randomPlayer.team === 1 ? 2 : 1;
+          room.setPlayerTeam(randomPlayer.id, newTeam);
+        }
       }
+      room.sendChat("🔄 Rotación de equipos realizada para equilibrio");
     }
-    room.sendChat("🔄 Rotación de equipos realizada para equilibrio");
+  } catch (e) {
+    // Ignorar errores en rotación
   }
 }, 180000); // Cada 3 minutos
-
-// ==================== FIN DE INICIALIZACIÓN ====================
-updateScoreboard();
