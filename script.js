@@ -7,89 +7,66 @@ const CONFIG = {
   ROOM_PASSWORD: "", // Dejar vacío para sala pública
   MAX_PLAYERS: 16, // 14 jugadores (7v7) + 2 espectadores
   TEAM_SIZE: 7,
-  SCOREBOARD_WIDTH: 100,
-  SCOREBOARD_HEIGHT: 100,
   MAP: "Big", // "Big", "Medium", "Small", "Rounded", "Hockey"
 };
 
 // ==================== VARIABLES GLOBALES ====================
 let stats = {}; // Estadísticas de jugadores
 let playerBans = []; // Lista de baneados
-let playerKicks = []; // Registro de kicks
 let adminPlayers = []; // Admins del servidor
+let gameActive = false;
 
 // ==================== INICIALIZACIÓN ====================
+
 room.setDefaultStadium(CONFIG.MAP);
 room.setScoreLimit(0);
 room.setTimeLimit(0);
-room.setCustomStadium(getCustomStadium());
+
+room.sendChat(`🟢 Servidor ⚽ PERÚ FUTSAL x7 iniciado correctamente!`);
+room.sendChat(`📋 Escribe !ayuda para ver comandos disponibles.`);
 
 // ==================== FUNCIONES PRINCIPALES ====================
 
-// Obtener estadio personalizado (futsal x7)
-function getCustomStadium() {
-  return `
-{
- "name": "PERÚ FUTSAL x7",
- "width": 105,
- "height": 68,
- "spawnDistance": 300,
- "bg": { "type": "grass", "width": 105, "height": 68, "kickOffRadius": 20 },
- "vertexes": [
-  { "x": -52.5, "y": -34, "trait": "ballArea" },
-  { "x": 52.5, "y": -34, "trait": "ballArea" },
-  { "x": 52.5, "y": 34, "trait": "ballArea" },
-  { "x": -52.5, "y": 34, "trait": "ballArea" }
- ],
- "segments": [
-  { "v0": 0, "v1": 1, "trait": "line" },
-  { "v0": 1, "v1": 2, "trait": "line" },
-  { "v0": 2, "v1": 3, "trait": "line" },
-  { "v0": 3, "v1": 0, "trait": "line" }
- ],
- "goals": [
-  { "p0": [-52.5, -17], "p1": [-52.5, 17], "trait": "goal" },
-  { "p0": [52.5, -17], "p1": [52.5, 17], "trait": "goal" }
- ],
- "playerPhysics": { "bplayer": { "acceleration": 0.08, "kickpower": 7, "kickAccuracy": 0.04, "deceleration": 0.96, "velocityFactor": 0.96, "radius": 0.15 } },
- "ballPhysics": { "radius": 0.075, "carryingCoef": 0.015, "damping": 0.99, "downSpeedCoef": 0.99, "accelCoef": 0.11 }
-}
-  `;
-}
-
-// ==================== MANEJO DE JUGADORES ====================
-
+// Evento: Jugador entra
 room.onPlayerJoin = function (player) {
+  // Verificar si está baneado
   if (playerBans.includes(player.id)) {
-    room.kickPlayer(player.id, "Estás baneado de esta sala", false);
+    room.kickPlayer(player.id, "🚫 Estás baneado de esta sala", false);
     return;
   }
 
+  // Crear estadísticas si no existen
   if (!stats[player.id]) {
     stats[player.id] = {
       name: player.name,
       goals: 0,
       assists: 0,
       games: 0,
-      team: null,
     };
   }
 
+  // Primer jugador es admin
+  if (adminPlayers.length === 0) {
+    adminPlayers.push(player.id);
+  }
+
   room.sendChat(
-    `✅ Bienvenido ${player.name} a ⚽ PERÚ FUTSAL x7! Escribe !ayuda para ver comandos.`
+    `✅ ¡Bienvenido ${player.name} a ⚽ PERÚ FUTSAL x7! Escribe !ayuda para comandos.`
   );
-  updatePlayerCount();
+  updateScoreboard();
 };
 
+// Evento: Jugador sale
 room.onPlayerLeave = function (player) {
-  updatePlayerCount();
+  updateScoreboard();
 };
 
+// Evento: Mensaje en chat
 room.onPlayerChat = function (player, message) {
-  const args = message.split(" ");
+  const args = message.trim().split(" ");
   const command = args[0].toLowerCase();
 
-  // Comandos de usuario
+  // ===== COMANDOS DE USUARIO =====
   if (command === "!ayuda") {
     showHelp(player);
     return false;
@@ -101,42 +78,68 @@ room.onPlayerChat = function (player, message) {
   }
 
   if (command === "!ranking") {
-    showRanking(player);
+    showRanking();
     return false;
   }
 
-  // Comandos de admin
-  if (isAdmin(player)) {
+  // ===== COMANDOS DE ADMIN =====
+  if (isAdmin(player.id)) {
     if (command === "!kick") {
-      handleKick(player, args);
+      if (args.length < 2) {
+        room.sendChat("❌ Uso: !kick [nombre]");
+        return false;
+      }
+      const targetName = args.slice(1).join(" ");
+      handleKick(player, targetName);
       return false;
     }
 
     if (command === "!ban") {
-      handleBan(player, args);
+      if (args.length < 2) {
+        room.sendChat("❌ Uso: !ban [nombre]");
+        return false;
+      }
+      const targetName = args.slice(1).join(" ");
+      handleBan(player, targetName);
       return false;
     }
 
     if (command === "!unban") {
-      handleUnban(player, args);
+      if (args.length < 2) {
+        room.sendChat("❌ Uso: !unban [id]");
+        return false;
+      }
+      handleUnban(args[1]);
       return false;
     }
 
     if (command === "!admin") {
-      handleAdminCommand(player, args);
+      if (args.length < 2) {
+        room.sendChat("❌ Uso: !admin [nombre]");
+        return false;
+      }
+      const targetName = args.slice(1).join(" ");
+      handleAdminToggle(player, targetName);
       return false;
     }
 
     if (command === "!reiniciar") {
-      room.startGame();
+      room.stopGame();
+      setTimeout(() => room.startGame(), 500);
       room.sendChat("🔄 Juego reiniciado!");
       return false;
     }
 
     if (command === "!clear") {
-      room.clearBans();
       playerBans = [];
-      room.sendChat("🗑️ Bans limpiados!");
+      room.clearBans();
+      room.sendChat("🗑️ Todos los bans fueron limpiados!");
+      return false;
+    }
+
+    if (command === "!reset") {
+      stats = {};
+      room.sendChat("📊 Estadísticas reseteadas!");
       return false;
     }
   }
@@ -144,13 +147,12 @@ room.onPlayerChat = function (player, message) {
   return true;
 };
 
-// ==================== MANEJO DE GOLES ====================
-
+// Evento: Gol anotado
 room.onGoal = function (player) {
-  if (player) {
+  if (player && stats[player.id]) {
     stats[player.id].goals++;
     room.sendChat(
-      `⚽ ${player.name} metió gol! Total: ${stats[player.id].goals}`
+      `⚽ ¡${player.name} METIÓ GOL! | Total: ${stats[player.id].goals} goles`
     );
   }
 };
@@ -158,171 +160,145 @@ room.onGoal = function (player) {
 // ==================== FUNCIONES DE COMANDOS ====================
 
 function showHelp(player) {
-  room.sendChat("=== 📋 COMANDOS DISPONIBLES ===");
-  room.sendChat("!stats - Ver tus estadísticas");
-  room.sendChat("!ranking - Ver ranking de goles");
-  room.sendChat("!ayuda - Ver este mensaje");
+  room.sendChat("════════════════════════════════════════");
+  room.sendChat("📋 COMANDOS DISPONIBLES - ⚽ PERÚ FUTSAL");
+  room.sendChat("════════════════════════════════════════");
+  room.sendChat("!stats     → Ver tus estadísticas");
+  room.sendChat("!ranking   → Ver top 10 goleadores");
+  room.sendChat("!ayuda     → Este mensaje");
 
-  if (isAdmin(player)) {
-    room.sendChat("--- 🛡️ COMANDOS ADMIN ---");
-    room.sendChat("!kick [nombre] - Expulsar jugador");
-    room.sendChat("!ban [nombre] - Banear jugador");
-    room.sendChat("!unban [id] - Desbanear jugador");
-    room.sendChat("!admin [nombre] - Hacer admin a jugador");
-    room.sendChat("!reiniciar - Reiniciar juego");
-    room.sendChat("!clear - Limpiar bans");
+  if (isAdmin(player.id)) {
+    room.sendChat("════════════════════════════════════════");
+    room.sendChat("🛡️ COMANDOS ADMIN");
+    room.sendChat("════════════════════════════════════════");
+    room.sendChat("!kick [nombre]      → Expulsar jugador");
+    room.sendChat("!ban [nombre]       → Banear jugador");
+    room.sendChat("!unban [id]         → Desbanear jugador");
+    room.sendChat("!admin [nombre]     → Toggle admin");
+    room.sendChat("!reiniciar          → Reiniciar juego");
+    room.sendChat("!reset              → Resetear stats");
+    room.sendChat("!clear              → Limpiar bans");
   }
 }
 
 function showStats(player) {
-  const playerStats = stats[player.id];
+  if (!stats[player.id]) {
+    stats[player.id] = { name: player.name, goals: 0, assists: 0, games: 0 };
+  }
+  const s = stats[player.id];
   room.sendChat(
-    `📊 ${playerStats.name} | Goles: ${playerStats.goals} | Asistencias: ${playerStats.assists} | Partidos: ${playerStats.games}`
+    `📊 ${s.name} | ⚽ Goles: ${s.goals} | 🤝 Asistencias: ${s.assists} | 🎮 Partidos: ${s.games}`
   );
 }
 
-function showRanking(player) {
+function showRanking() {
   const sorted = Object.values(stats)
     .sort((a, b) => b.goals - a.goals)
     .slice(0, 10);
 
-  room.sendChat("🏆 TOP 10 GOLEADORES:");
+  if (sorted.length === 0) {
+    room.sendChat("📊 No hay datos aún");
+    return;
+  }
+
+  room.sendChat("🏆════════════════════════════════════════");
+  room.sendChat("🏆 TOP 10 GOLEADORES - ⚽ PERÚ FUTSAL");
+  room.sendChat("🏆════════════════════════════════════════");
   sorted.forEach((s, i) => {
-    room.sendChat(`${i + 1}. ${s.name} - ${s.goals} goles`);
+    const medal = i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : `${i + 1}.`;
+    room.sendChat(`${medal} ${s.name} - ${s.goals} ⚽`);
   });
 }
 
-function handleKick(player, args) {
-  if (args.length < 2) {
-    room.sendChat("❌ Uso: !kick [nombre]");
-    return;
-  }
-
-  const targetName = args.slice(1).join(" ");
-  const targetPlayer = room.getPlayer(findPlayerByName(targetName));
-
-  if (!targetPlayer) {
+function handleKick(admin, targetName) {
+  const targetId = findPlayerByName(targetName);
+  if (targetId === null) {
     room.sendChat("❌ Jugador no encontrado");
     return;
   }
-
-  room.kickPlayer(
-    targetPlayer.id,
-    `Expulsado por ${player.name}`,
-    false
-  );
-  room.sendChat(`🚪 ${targetPlayer.name} fue expulsado por ${player.name}`);
+  room.kickPlayer(targetId, `Expulsado por ${admin.name}`, false);
+  room.sendChat(`🚪 ${targetName} fue expulsado por ${admin.name}`);
 }
 
-function handleBan(player, args) {
-  if (args.length < 2) {
-    room.sendChat("❌ Uso: !ban [nombre]");
-    return;
-  }
-
-  const targetName = args.slice(1).join(" ");
+function handleBan(admin, targetName) {
   const targetId = findPlayerByName(targetName);
-  const targetPlayer = room.getPlayer(targetId);
-
-  if (!targetPlayer) {
+  if (targetId === null) {
     room.sendChat("❌ Jugador no encontrado");
     return;
   }
-
   if (!playerBans.includes(targetId)) {
     playerBans.push(targetId);
   }
-
-  room.kickPlayer(
-    targetId,
-    `Baneado por ${player.name}`,
-    true
-  );
-  room.sendChat(`🚫 ${targetPlayer.name} fue baneado por ${player.name}`);
+  room.kickPlayer(targetId, `Baneado por ${admin.name}`, true);
+  room.sendChat(`🚫 ${targetName} fue BANEADO por ${admin.name}`);
 }
 
-function handleUnban(player, args) {
-  if (args.length < 2) {
-    room.sendChat("❌ Uso: !unban [id]");
-    return;
-  }
-
-  const targetId = parseInt(args[1]);
-  playerBans = playerBans.filter((id) => id !== targetId);
-  room.sendChat(`✅ Jugador ID ${targetId} fue desbaneado`);
+function handleUnban(idStr) {
+  const id = parseInt(idStr);
+  playerBans = playerBans.filter((bid) => bid !== id);
+  room.sendChat(`✅ Jugador ID ${id} fue desbaneado`);
 }
 
-function handleAdminCommand(player, args) {
-  if (args.length < 2) {
-    room.sendChat("❌ Uso: !admin [nombre]");
-    return;
-  }
-
-  const targetName = args.slice(1).join(" ");
+function handleAdminToggle(admin, targetName) {
   const targetId = findPlayerByName(targetName);
-  const targetPlayer = room.getPlayer(targetId);
-
-  if (!targetPlayer) {
+  if (targetId === null) {
     room.sendChat("❌ Jugador no encontrado");
     return;
   }
 
-  if (!adminPlayers.includes(targetId)) {
+  const isCurrentAdmin = adminPlayers.includes(targetId);
+  if (!isCurrentAdmin) {
     adminPlayers.push(targetId);
-    room.sendChat(`👑 ${targetPlayer.name} es ahora admin`);
+    room.sendChat(`👑 ${targetName} ahora es ADMIN`);
   } else {
     adminPlayers = adminPlayers.filter((id) => id !== targetId);
-    room.sendChat(`📉 ${targetPlayer.name} ya no es admin`);
+    room.sendChat(`📉 ${targetName} ya no es admin`);
   }
 }
 
 // ==================== FUNCIONES DE UTILIDAD ====================
 
-function isAdmin(player) {
-  // Primer jugador en conectar es admin por defecto
-  const allPlayers = room.getPlayer(null);
-  if (!allPlayers || allPlayers.length === 0) return false;
-
-  return (
-    adminPlayers.includes(player.id) || allPlayers[0].id === player.id
-  );
+function isAdmin(playerId) {
+  return adminPlayers.includes(playerId);
 }
 
 function findPlayerByName(name) {
-  const players = room.getPlayer(null);
-  const found = players.find(
-    (p) => p.name.toLowerCase().includes(name.toLowerCase())
-  );
-  return found ? found.id : null;
+  const players = room.getPlayer(null) || [];
+  for (let p of players) {
+    if (p.name.toLowerCase().includes(name.toLowerCase())) {
+      return p.id;
+    }
+  }
+  return null;
 }
 
-function updatePlayerCount() {
-  const players = room.getPlayer(null);
+function updateScoreboard() {
+  const players = room.getPlayer(null) || [];
   const redTeam = players.filter((p) => p.team === 1).length;
   const blueTeam = players.filter((p) => p.team === 2).length;
-  room.setScoreBoard(`⚽ PERÚ FUTSAL x7 | Rojos: ${redTeam} | Azules: ${blueTeam}`);
+  const spectators = players.filter((p) => p.team === 0).length;
+  
+  room.setScoreBoard(
+    `⚽ PERÚ FUTSAL x7 | 🔴 Rojos: ${redTeam} | 🔵 Azules: ${blueTeam} | 👁️ Espectadores: ${spectators}`
+  );
 }
 
 // ==================== ROTACIÓN AUTOMÁTICA DE EQUIPOS ====================
-
-// Rotar equipos cada 3 minutos (180 segundos)
 setInterval(function () {
-  const players = room.getPlayer(null);
-  if (players.length >= 2) {
-    // Cambiar aleatoriamente a algunos jugadores de equipo
-    const randomIndex = Math.floor(Math.random() * players.length);
-    const randomPlayer = players[randomIndex];
-
-    if (randomPlayer && randomPlayer.team !== 0) {
-      // Si está en equipo rojo, cambiar a azul, y viceversa
-      const newTeam = randomPlayer.team === 1 ? 2 : 1;
-      room.setPlayerTeam(randomPlayer.id, newTeam);
+  const players = room.getPlayer(null) || [];
+  if (players.length >= 4) {
+    // Rotar aleatoriamente algunos jugadores cada 3 minutos
+    const rotateCount = Math.floor(players.length * 0.2); // 20% de los jugadores
+    for (let i = 0; i < rotateCount; i++) {
+      const randomPlayer = players[Math.floor(Math.random() * players.length)];
+      if (randomPlayer && randomPlayer.team !== 0) {
+        const newTeam = randomPlayer.team === 1 ? 2 : 1;
+        room.setPlayerTeam(randomPlayer.id, newTeam);
+      }
     }
+    room.sendChat("🔄 Rotación de equipos realizada para equilibrio");
   }
-}, 180000);
+}, 180000); // Cada 3 minutos
 
-// ==================== INICIAR ====================
-
-room.setDefaultStadium(CONFIG.MAP);
-room.sendChat(`🟢 Servidor ⚽ PERÚ FUTSAL x7 iniciado correctamente!`);
-room.sendChat(`⚙️ Escribe !ayuda para ver comandos disponibles.`);
+// ==================== FIN DE INICIALIZACIÓN ====================
+updateScoreboard();
